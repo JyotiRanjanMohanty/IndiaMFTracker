@@ -1,36 +1,42 @@
-# [Project name]
+# India MF Portfolio Tracker
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A full-stack web application for Indian investors to analyse their SIP portfolio's true allocation across sectors and market caps — powered by Morningstar India and Groww scraping.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
+- `pnpm --filter @workspace/mf-tracker run dev` — run the frontend (port 18572)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
+- Frontend: React 19 + Vite + Tailwind CSS v4 + shadcn/ui + Recharts
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Scraping: Axios + Cheerio
+- Fund data: mfapi.in (AMFI database)
+- Sector data: Morningstar India (factsheet scraping)
+- Market cap: Groww (fund page scraping)
+- Validation: Zod + Orval codegen from OpenAPI spec
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/mf-tracker/src/` — React frontend (Home/Analysis/About pages)
+- `artifacts/api-server/src/lib/` — Scraper services (fundSearch, morningstarScraper, growwScraper)
+- `artifacts/api-server/src/routes/` — API routes (funds, portfolio, source download)
+- `lib/api-spec/openapi.yaml` — OpenAPI 3.1 contract (source of truth)
+- `lib/api-client-react/src/generated/` — Generated React Query hooks
+- `lib/api-zod/src/generated/` — Generated Zod schemas
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
-
-## Product
-
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Contract-first: OpenAPI spec drives both frontend hooks (Orval → React Query) and backend validation (Zod schemas)
+- In-memory 4-hour cache for Morningstar and Groww scraping results to reduce load on source sites
+- Name-similarity check (token overlap ≥ 0.25) before accepting scraper search results to prevent wrong fund matching
+- Source download zips the project at request time using adm-zip; dotfiles and .env-adjacent files are excluded for security
+- SIP validation enforces both per-fund [0,100] bounds and sum ≈ 100% (±0.5%) at the backend
 
 ## User preferences
 
@@ -38,8 +44,6 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- The Morningstar and Groww scrapers depend on those sites' HTML/JS structure — may need updates if they change
+- Source download (~`GET /api/source/download`) has no auth; in production consider gating it
+- `pnpm --filter @workspace/api-spec run codegen` must be re-run after any openapi.yaml change

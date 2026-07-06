@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "India MF Portfolio Tracker"
+version = "1.0.0"
+id = "artifacts/mf-tracker"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18572
+
+[services.development]
+run = "pnpm --filter @workspace/mf-tracker run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mf-tracker", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/mf-tracker/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18572"
+BASE_PATH = "/"

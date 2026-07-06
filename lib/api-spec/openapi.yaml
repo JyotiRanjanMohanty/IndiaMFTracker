@@ -3,13 +3,19 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: India Mutual Fund Portfolio Tracker API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: funds
+    description: Mutual fund operations
+  - name: portfolio
+    description: Portfolio analysis operations
+  - name: source
+    description: Source code download
 paths:
   /healthz:
     get:
@@ -24,6 +30,135 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /funds/search:
+    get:
+      operationId: searchFunds
+      tags: [funds]
+      summary: Search mutual funds by name
+      description: Returns autocomplete suggestions from the AMFI fund database
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query string
+      responses:
+        "200":
+          description: List of matching funds
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FundSuggestion"
+
+  /funds/morningstar:
+    get:
+      operationId: getFundMorningstarData
+      tags: [funds]
+      summary: Get sector allocation from Morningstar for a fund
+      parameters:
+        - name: fundName
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Mutual fund name to look up on Morningstar
+      responses:
+        "200":
+          description: Morningstar sector and asset allocation data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MorningstarData"
+        "404":
+          description: Fund not found on Morningstar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Scraping error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /funds/groww:
+    get:
+      operationId: getFundGrowwData
+      tags: [funds]
+      summary: Get market cap allocation from Groww for a fund
+      parameters:
+        - name: fundName
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Mutual fund name to look up on Groww
+      responses:
+        "200":
+          description: Market cap allocation data from Groww
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrowwData"
+        "404":
+          description: Fund not found on Groww
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Scraping error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /portfolio/analyze:
+    post:
+      operationId: analyzePortfolio
+      tags: [portfolio]
+      summary: Analyze a portfolio of mutual funds
+      description: Takes a list of funds with SIP percentages and returns aggregated sector and market cap allocations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortfolioInput"
+      responses:
+        "200":
+          description: Aggregated portfolio analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioAnalysis"
+        "400":
+          description: Validation error (e.g. SIP percentages don't add to 100)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /source/download:
+    get:
+      operationId: downloadSource
+      tags: [source]
+      summary: Download the full source code as a zip archive
+      description: Zips the project source code with README and returns a downloadable archive
+      responses:
+        "200":
+          description: Zip archive of source code
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +169,252 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    FundSuggestion:
+      type: object
+      required: [schemeCode, schemeName, fundHouse, category]
+      properties:
+        schemeCode:
+          type: string
+          description: AMFI scheme code
+        schemeName:
+          type: string
+          description: Full scheme name
+        fundHouse:
+          type: string
+          description: AMC / fund house name
+        category:
+          type: string
+          description: Fund category (e.g. Flexi Cap, Large Cap)
+
+    SectorAllocation:
+      type: object
+      description: 11-subsector Morningstar allocation breakdown
+      required:
+        - cyclical
+        - sensitive
+        - defensive
+        - financialServices
+        - realEstate
+        - consumerCyclical
+        - basicMaterials
+        - communicationServices
+        - energy
+        - industrials
+        - technology
+        - consumerDefensive
+        - healthcare
+        - utilities
+      properties:
+        cyclical:
+          type: number
+          description: Total cyclical sector %
+        sensitive:
+          type: number
+          description: Total sensitive sector %
+        defensive:
+          type: number
+          description: Total defensive sector %
+        financialServices:
+          type: number
+          description: Financial Services % (cyclical)
+        realEstate:
+          type: number
+          description: Real Estate % (cyclical)
+        consumerCyclical:
+          type: number
+          description: Consumer Cyclical % (cyclical)
+        basicMaterials:
+          type: number
+          description: Basic Materials % (cyclical)
+        communicationServices:
+          type: number
+          description: Communication Services % (sensitive)
+        energy:
+          type: number
+          description: Energy % (sensitive)
+        industrials:
+          type: number
+          description: Industrials % (sensitive)
+        technology:
+          type: number
+          description: Technology % (sensitive)
+        consumerDefensive:
+          type: number
+          description: Consumer Defensive % (defensive)
+        healthcare:
+          type: number
+          description: Healthcare % (defensive)
+        utilities:
+          type: number
+          description: Utilities % (defensive)
+
+    MorningstarData:
+      type: object
+      required: [fundName, equityPercent, debtPercent, cashPercent, sectors]
+      properties:
+        fundName:
+          type: string
+        morningstarUrl:
+          type: ["string", "null"]
+        equityPercent:
+          type: number
+        debtPercent:
+          type: number
+        cashPercent:
+          type: number
+        otherPercent:
+          type: number
+        sectors:
+          $ref: "#/components/schemas/SectorAllocation"
+
+    MarketCapAllocation:
+      type: object
+      required: [largeCap, midCap, smallCap]
+      properties:
+        largeCap:
+          type: number
+        midCap:
+          type: number
+        smallCap:
+          type: number
+        others:
+          type: number
+
+    GrowwData:
+      type: object
+      required: [fundName, marketCap]
+      properties:
+        fundName:
+          type: string
+        growwUrl:
+          type: ["string", "null"]
+        marketCap:
+          $ref: "#/components/schemas/MarketCapAllocation"
+
+    PortfolioFundInput:
+      type: object
+      required: [fundName, sipPercent]
+      properties:
+        fundName:
+          type: string
+          description: Full name of the mutual fund scheme
+        sipPercent:
+          type: number
+          description: Percentage of total SIP allocated to this fund (0–100)
+        schemeCode:
+          type: ["string", "null"]
+          description: AMFI scheme code (optional, used to improve lookup accuracy)
+
+    PortfolioInput:
+      type: object
+      required: [funds]
+      properties:
+        funds:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortfolioFundInput"
+          minItems: 1
+
+    FundAnalysis:
+      type: object
+      required: [fundName, sipPercent]
+      properties:
+        fundName:
+          type: string
+        sipPercent:
+          type: number
+        morningstar:
+          oneOf:
+            - $ref: "#/components/schemas/MorningstarData"
+            - type: "null"
+        groww:
+          oneOf:
+            - $ref: "#/components/schemas/GrowwData"
+            - type: "null"
+        morningstarError:
+          type: ["string", "null"]
+        growwError:
+          type: ["string", "null"]
+
+    AggregatedSectors:
+      type: object
+      description: Weighted-average sector allocation across all funds
+      required: [cyclical, sensitive, defensive, financialServices, realEstate, consumerCyclical, basicMaterials, communicationServices, energy, industrials, technology, consumerDefensive, healthcare, utilities]
+      properties:
+        cyclical:
+          type: number
+        sensitive:
+          type: number
+        defensive:
+          type: number
+        financialServices:
+          type: number
+        realEstate:
+          type: number
+        consumerCyclical:
+          type: number
+        basicMaterials:
+          type: number
+        communicationServices:
+          type: number
+        energy:
+          type: number
+        industrials:
+          type: number
+        technology:
+          type: number
+        consumerDefensive:
+          type: number
+        healthcare:
+          type: number
+        utilities:
+          type: number
+
+    AggregatedMarketCap:
+      type: object
+      required: [largeCap, midCap, smallCap, others]
+      properties:
+        largeCap:
+          type: number
+        midCap:
+          type: number
+        smallCap:
+          type: number
+        others:
+          type: number
+
+    AggregatedAllocation:
+      type: object
+      required: [equityPercent, debtPercent, cashPercent, otherPercent, sectors, marketCap]
+      properties:
+        equityPercent:
+          type: number
+        debtPercent:
+          type: number
+        cashPercent:
+          type: number
+        otherPercent:
+          type: number
+        sectors:
+          $ref: "#/components/schemas/AggregatedSectors"
+        marketCap:
+          $ref: "#/components/schemas/AggregatedMarketCap"
+
+    PortfolioAnalysis:
+      type: object
+      required: [funds, aggregated]
+      properties:
+        funds:
+          type: array
+          items:
+            $ref: "#/components/schemas/FundAnalysis"
+        aggregated:
+          $ref: "#/components/schemas/AggregatedAllocation"
