@@ -10,5 +10,5 @@ export interface MarketCapAllocation {
   largeCap: number;
   midCap: number;
   smallCap: number;
-  others?: number;
+  others: number;
 }

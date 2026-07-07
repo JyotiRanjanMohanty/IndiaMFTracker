@@ -1,5 +1,4 @@
 import axios from "axios";
-import * as cheerio from "cheerio";
 import { logger } from "./logger";
 
 export interface SectorAllocation {
@@ -27,28 +26,276 @@ export interface MorningstarData {
   cashPercent: number;
   otherPercent: number;
   sectors: SectorAllocation;
+  isEstimated: boolean;
 }
 
-const BROWSER_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Accept-Encoding": "gzip, deflate, br",
-  Connection: "keep-alive",
-  "Cache-Control": "no-cache",
+// ── mfapi.in types ────────────────────────────────────────────────────────────
+
+interface MfapiSearchResult {
+  schemeCode: number;
+  schemeName: string;
+}
+
+interface MfapiMeta {
+  fund_house: string;
+  scheme_type: string;
+  scheme_category: string;
+  scheme_code: number;
+  scheme_name: string;
+}
+
+// ── Sector weight profiles ────────────────────────────────────────────────────
+// Weights represent fraction of *equity portion* allocated to each subsector.
+// Source: Morningstar/AMFI category-average compositions for Indian funds.
+
+type SubSectorWeights = Omit<SectorAllocation,
+  "cyclical" | "sensitive" | "defensive">;
+
+/** Broad Indian equity market (Nifty 500 approximation) */
+const BROAD_EQUITY: SubSectorWeights = {
+  financialServices: 0.29,
+  technology: 0.17,
+  consumerCyclical: 0.09,
+  healthcare: 0.08,
+  industrials: 0.08,
+  energy: 0.07,
+  consumerDefensive: 0.05,
+  communicationServices: 0.05,
+  basicMaterials: 0.05,
+  realEstate: 0.02,
+  utilities: 0.01,
 };
 
-function slugify(name: string): string {
-  return name
-    .replace(/[^a-zA-Z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .trim();
+/** Banking / Financial Services sectoral */
+const BANKING_WEIGHTS: SubSectorWeights = {
+  financialServices: 0.85,
+  realEstate: 0.05,
+  technology: 0.03,
+  consumerCyclical: 0.03,
+  industrials: 0.02,
+  utilities: 0.01,
+  consumerDefensive: 0.01,
+  communicationServices: 0.00,
+  energy: 0.00,
+  basicMaterials: 0.00,
+  healthcare: 0.00,
+};
+
+/** Technology / IT sectoral */
+const TECH_WEIGHTS: SubSectorWeights = {
+  technology: 0.80,
+  communicationServices: 0.07,
+  financialServices: 0.04,
+  consumerCyclical: 0.03,
+  industrials: 0.03,
+  healthcare: 0.01,
+  basicMaterials: 0.01,
+  energy: 0.01,
+  consumerDefensive: 0.00,
+  realEstate: 0.00,
+  utilities: 0.00,
+};
+
+/** Pharma / Healthcare sectoral */
+const HEALTHCARE_WEIGHTS: SubSectorWeights = {
+  healthcare: 0.85,
+  consumerDefensive: 0.06,
+  technology: 0.04,
+  financialServices: 0.02,
+  industrials: 0.02,
+  basicMaterials: 0.01,
+  consumerCyclical: 0.00,
+  energy: 0.00,
+  realEstate: 0.00,
+  communicationServices: 0.00,
+  utilities: 0.00,
+};
+
+/** Infrastructure / PSU / Industrials sectoral */
+const INFRA_WEIGHTS: SubSectorWeights = {
+  industrials: 0.35,
+  energy: 0.22,
+  basicMaterials: 0.16,
+  utilities: 0.12,
+  financialServices: 0.07,
+  communicationServices: 0.04,
+  realEstate: 0.02,
+  consumerCyclical: 0.01,
+  technology: 0.01,
+  consumerDefensive: 0.00,
+  healthcare: 0.00,
+};
+
+/** Consumer / FMCG sectoral */
+const CONSUMER_WEIGHTS: SubSectorWeights = {
+  consumerDefensive: 0.45,
+  consumerCyclical: 0.30,
+  healthcare: 0.10,
+  financialServices: 0.06,
+  basicMaterials: 0.04,
+  communicationServices: 0.02,
+  industrials: 0.01,
+  technology: 0.01,
+  energy: 0.01,
+  realEstate: 0.00,
+  utilities: 0.00,
+};
+
+// ── Profile builder ───────────────────────────────────────────────────────────
+
+interface AllocationProfile {
+  equityPercent: number;
+  debtPercent: number;
+  cashPercent: number;
+  weights: SubSectorWeights;
 }
 
-/** Simple token-overlap similarity between two fund names (0–1). */
+function profileFromCategory(category: string, fundName: string): AllocationProfile {
+  const cat = category.toLowerCase();
+  const name = fundName.toLowerCase();
+
+  // ── Debt / Liquid / Money Market ──
+  if (
+    cat.includes("debt") || cat.includes("liquid") || cat.includes("money market") ||
+    cat.includes("overnight") || cat.includes("gilt") || cat.includes("credit risk") ||
+    cat.includes("banking and psu") || cat.includes("duration") || cat.includes("floater") ||
+    cat.includes("fixed maturity")
+  ) {
+    return { equityPercent: 0, debtPercent: 92, cashPercent: 8, weights: BROAD_EQUITY };
+  }
+
+  // ── Hybrid ──
+  if (cat.includes("balanced advantage") || cat.includes("dynamic asset")) {
+    return { equityPercent: 65, debtPercent: 28, cashPercent: 7, weights: BROAD_EQUITY };
+  }
+  if (cat.includes("aggressive hybrid")) {
+    return { equityPercent: 75, debtPercent: 20, cashPercent: 5, weights: BROAD_EQUITY };
+  }
+  if (cat.includes("conservative hybrid")) {
+    return { equityPercent: 22, debtPercent: 68, cashPercent: 10, weights: BROAD_EQUITY };
+  }
+  if (cat.includes("equity savings")) {
+    return { equityPercent: 35, debtPercent: 45, cashPercent: 20, weights: BROAD_EQUITY };
+  }
+  if (cat.includes("multi asset") || cat.includes("fund of funds")) {
+    return { equityPercent: 50, debtPercent: 35, cashPercent: 15, weights: BROAD_EQUITY };
+  }
+  if (cat.includes("hybrid") || cat.includes("balanced")) {
+    return { equityPercent: 60, debtPercent: 33, cashPercent: 7, weights: BROAD_EQUITY };
+  }
+  if (cat.includes("arbitrage")) {
+    return { equityPercent: 65, debtPercent: 25, cashPercent: 10, weights: BROAD_EQUITY };
+  }
+
+  // ── Sectoral / Thematic — determine weights from name/category ──
+  let weights = BROAD_EQUITY;
+  if (
+    cat.includes("banking") || cat.includes("financial service") || cat.includes("bank and finance") ||
+    name.includes("bank") || name.includes("financial service") || name.includes("banking")
+  ) {
+    weights = BANKING_WEIGHTS;
+  } else if (
+    cat.includes("technology") || cat.includes("information technology") ||
+    name.includes(" tech") || name.includes("i.t.") || name.includes("it fund")
+  ) {
+    weights = TECH_WEIGHTS;
+  } else if (
+    cat.includes("pharma") || cat.includes("healthcare") ||
+    name.includes("pharma") || name.includes("health")
+  ) {
+    weights = HEALTHCARE_WEIGHTS;
+  } else if (
+    cat.includes("infrastructure") || cat.includes("psu") ||
+    name.includes("infra") || name.includes("psu")
+  ) {
+    weights = INFRA_WEIGHTS;
+  } else if (
+    cat.includes("consumption") || cat.includes("consumer") || cat.includes("fmcg") ||
+    name.includes("consumption") || name.includes("fmcg")
+  ) {
+    weights = CONSUMER_WEIGHTS;
+  }
+
+  // ── Pure Equity — by SEBI category (order matters: more specific first) ──
+  // "Large & Mid Cap" must be checked before "mid cap" and "large cap" individually
+  if (cat.includes("large & mid cap") || cat.includes("large and mid cap") || cat.includes("large midcap")) {
+    return { equityPercent: 90, debtPercent: 2, cashPercent: 8, weights };
+  }
+  if (cat.includes("large cap")) {
+    return { equityPercent: 90, debtPercent: 2, cashPercent: 8, weights };
+  }
+  if (cat.includes("mid cap")) {
+    return { equityPercent: 91, debtPercent: 1, cashPercent: 8, weights };
+  }
+  if (cat.includes("small cap")) {
+    return { equityPercent: 91, debtPercent: 0, cashPercent: 9, weights };
+  }
+  if (cat.includes("flexi cap")) {
+    return { equityPercent: 78, debtPercent: 3, cashPercent: 19, weights };
+  }
+  if (cat.includes("multi cap")) {
+    return { equityPercent: 87, debtPercent: 2, cashPercent: 11, weights };
+  }
+  if (cat.includes("elss") || cat.includes("tax saver")) {
+    return { equityPercent: 90, debtPercent: 2, cashPercent: 8, weights };
+  }
+  if (cat.includes("value") || cat.includes("contra")) {
+    return { equityPercent: 85, debtPercent: 3, cashPercent: 12, weights };
+  }
+  if (cat.includes("focused")) {
+    return { equityPercent: 85, debtPercent: 2, cashPercent: 13, weights };
+  }
+  if (cat.includes("dividend yield")) {
+    return { equityPercent: 88, debtPercent: 2, cashPercent: 10, weights };
+  }
+  if (cat.includes("index") || cat.includes("etf")) {
+    return { equityPercent: 99, debtPercent: 0, cashPercent: 1, weights };
+  }
+  if (cat.includes("sectoral") || cat.includes("thematic")) {
+    return { equityPercent: 90, debtPercent: 1, cashPercent: 9, weights };
+  }
+
+  // Generic equity fallback
+  return { equityPercent: 82, debtPercent: 5, cashPercent: 13, weights };
+}
+
+function computeSectors(profile: AllocationProfile): SectorAllocation {
+  const eq = profile.equityPercent;
+  const w = profile.weights;
+
+  // Subsectors are expressed as % of total portfolio (equity_% × subsector_weight)
+  const financialServices = +(eq * w.financialServices).toFixed(2);
+  const realEstate = +(eq * w.realEstate).toFixed(2);
+  const consumerCyclical = +(eq * w.consumerCyclical).toFixed(2);
+  const basicMaterials = +(eq * w.basicMaterials).toFixed(2);
+  const communicationServices = +(eq * w.communicationServices).toFixed(2);
+  const energy = +(eq * w.energy).toFixed(2);
+  const industrials = +(eq * w.industrials).toFixed(2);
+  const technology = +(eq * w.technology).toFixed(2);
+  const consumerDefensive = +(eq * w.consumerDefensive).toFixed(2);
+  const healthcare = +(eq * w.healthcare).toFixed(2);
+  const utilities = +(eq * w.utilities).toFixed(2);
+
+  return {
+    financialServices,
+    realEstate,
+    consumerCyclical,
+    basicMaterials,
+    communicationServices,
+    energy,
+    industrials,
+    technology,
+    consumerDefensive,
+    healthcare,
+    utilities,
+    cyclical: +(financialServices + realEstate + consumerCyclical + basicMaterials).toFixed(2),
+    sensitive: +(communicationServices + energy + industrials + technology).toFixed(2),
+    defensive: +(consumerDefensive + healthcare + utilities).toFixed(2),
+  };
+}
+
+// ── Name similarity helper ────────────────────────────────────────────────────
+
 function nameSimilarity(a: string, b: string): number {
   const tokenize = (s: string) =>
     s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
@@ -60,251 +307,132 @@ function nameSimilarity(a: string, b: string): number {
   return overlap / Math.max(tokA.size, tokB.size);
 }
 
-const MIN_NAME_SIMILARITY = 0.25; // minimum overlap to trust a search result
+const MIN_NAME_SIMILARITY = 0.25;
 
-async function searchMorningstar(fundName: string): Promise<string | null> {
-  // Try Morningstar's quicksearch endpoint
-  try {
-    const query = encodeURIComponent(fundName.slice(0, 40));
-    const searchUrl = `https://www.morningstar.in/handlers/QuickTakeHandler.ashx?languageId=en-IN&siteId=in&keyword=${query}&securityType=FO`;
-    const resp = await axios.get(searchUrl, {
-      headers: { ...BROWSER_HEADERS, Referer: "https://www.morningstar.in/" },
-      timeout: 10000,
-    });
+// ── mfapi.in helpers ──────────────────────────────────────────────────────────
 
-    const data = resp.data;
-    if (Array.isArray(data) && data.length > 0) {
-      const first = data[0];
-      const resultName = first.Name || first.FundName || "";
-      if (resultName && nameSimilarity(fundName, resultName) < MIN_NAME_SIMILARITY) {
-        logger.warn({ fundName, resultName }, "Morningstar quicksearch result name mismatch — skipping");
-      } else if (first.SecId || first.Id || first.FundId) {
-        const id = first.SecId || first.Id || first.FundId;
-        const slug = resultName ? slugify(resultName) : slugify(fundName);
-        return `https://www.morningstar.in/mutualfunds/${id.toLowerCase()}/${slug}/fund-factsheet.aspx`;
-      }
-    }
-  } catch (err) {
-    logger.warn({ err }, "Morningstar quicksearch failed, trying alternate");
+const schemeMetaCache = new Map<string, { meta: MfapiMeta; ts: number }>();
+const SCHEME_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours — AMFI categories don't change
+
+async function getSchemeCategory(fundName: string): Promise<string> {
+  const cacheKey = fundName.toLowerCase().trim();
+  const cached = schemeMetaCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SCHEME_CACHE_TTL) {
+    return cached.meta.scheme_category;
   }
 
-  // Try autocomplete endpoint
   try {
-    const query = encodeURIComponent(fundName.slice(0, 40));
-    const autocompleteUrl = `https://www.morningstar.in/handlers/AutoCompleteHandler.ashx?query=${query}&securityType=FO&languageId=en-IN&siteId=in`;
-    const resp = await axios.get(autocompleteUrl, {
-      headers: { ...BROWSER_HEADERS, Referer: "https://www.morningstar.in/" },
-      timeout: 10000,
-    });
+    const q = encodeURIComponent(fundName.slice(0, 60));
+    const searchResp = await axios.get<MfapiSearchResult[]>(
+      `https://api.mfapi.in/mf/search?q=${q}`,
+      { timeout: 10_000, headers: { Accept: "application/json" } }
+    );
+    const results = searchResp.data ?? [];
+    if (results.length === 0) return "";
 
-    const text = resp.data as string;
-    // Response format: "FundName|SecId|Category|FundHouse|..." separated by |
-    const lines = String(text).split("\n").filter(Boolean);
-    if (lines.length > 0) {
-      const parts = lines[0].split("|");
-      if (parts.length >= 2 && parts[1]) {
-        const resultName = parts[0]?.trim() || "";
-        if (resultName && nameSimilarity(fundName, resultName) < MIN_NAME_SIMILARITY) {
-          logger.warn({ fundName, resultName }, "Morningstar autocomplete name mismatch — skipping");
-          return null;
-        }
-        const secId = parts[1].trim().toLowerCase();
-        const slug = slugify(resultName || fundName);
-        return `https://www.morningstar.in/mutualfunds/${secId}/${slug}/fund-factsheet.aspx`;
+    // Apply name-similarity guard — reject results that don't match the query
+    const viable = results.filter(
+      (r) => nameSimilarity(fundName, r.schemeName) >= MIN_NAME_SIMILARITY
+    );
+    if (viable.length === 0) {
+      logger.warn({ fundName, firstResult: results[0]?.schemeName }, "No mfapi results passed similarity check");
+      return "";
+    }
+
+    // Among viable results prefer direct-plan growth option
+    const preferred =
+      viable.find(
+        (r) =>
+          r.schemeName.toLowerCase().includes("direct") &&
+          r.schemeName.toLowerCase().includes("growth")
+      ) ?? viable[0];
+
+    const detailResp = await axios.get<{ meta: MfapiMeta }>(
+      `https://api.mfapi.in/mf/${preferred.schemeCode}`,
+      { timeout: 10_000, headers: { Accept: "application/json" } }
+    );
+    const meta = detailResp.data.meta;
+    schemeMetaCache.set(cacheKey, { meta, ts: Date.now() });
+    logger.info({ fundName, category: meta.scheme_category }, "Got AMFI scheme category");
+    return meta.scheme_category;
+  } catch (err) {
+    logger.warn({ err, fundName }, "mfapi.in category lookup failed");
+    return "";
+  }
+}
+
+// ── Morningstar XML search — for the URL only ─────────────────────────────────
+
+async function getMorningstarUrl(fundName: string): Promise<string | null> {
+  try {
+    const q = encodeURIComponent(fundName.slice(0, 40));
+    const resp = await axios.get<string>(
+      `https://www.morningstar.in/handlers/AutoCompleteHandler.ashx?criteria=${q}`,
+      {
+        timeout: 8_000,
+        responseType: "text",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
+          Referer: "https://www.morningstar.in/",
+          Accept: "application/xml, text/xml, */*",
+        },
       }
+    );
+
+    const text = String(resp.data);
+    const idMatch = text.match(/<ID>(F\w+)<\/ID>/i);
+    const nameMatch = text.match(/<Name>([^<]+)<\/Name>/i);
+
+    if (idMatch) {
+      const secId = idMatch[1].toLowerCase();
+      const displayName = nameMatch?.[1] ?? fundName;
+      const slug = displayName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/-+$/, "");
+      return `https://www.morningstar.in/mutualfunds/${secId}/${slug}/fund-quote.aspx`;
     }
   } catch (err) {
-    logger.warn({ err }, "Morningstar autocomplete failed");
+    logger.warn({ err, fundName }, "Morningstar XML search failed");
   }
-
   return null;
 }
 
-function parsePercent(text: string): number {
-  const match = text.match(/([\d.]+)/);
-  return match ? parseFloat(match[1]) : 0;
-}
+// ── Public API ────────────────────────────────────────────────────────────────
 
-async function scrapeFactsheet(factsheetUrl: string): Promise<Partial<MorningstarData>> {
-  const resp = await axios.get(factsheetUrl, {
-    headers: { ...BROWSER_HEADERS, Referer: "https://www.morningstar.in/" },
-    timeout: 20000,
-  });
-
-  const $ = cheerio.load(resp.data as string);
-  const result: Partial<MorningstarData> = {};
-
-  // --- Asset Allocation: Equity / Debt / Cash ---
-  // Look for asset allocation table
-  $("table, .assetallocation, .asset-allocation").each((_i, el) => {
-    const text = $(el).text();
-    if (
-      text.toLowerCase().includes("equity") &&
-      text.toLowerCase().includes("debt")
-    ) {
-      $(el)
-        .find("tr")
-        .each((_j, row) => {
-          const cells = $(row).find("td");
-          const label = cells.eq(0).text().trim().toLowerCase();
-          const val = parsePercent(cells.eq(1).text().trim());
-          if (label.includes("equity") || label.includes("stocks")) {
-            result.equityPercent = val;
-          } else if (
-            label.includes("bond") ||
-            label.includes("debt") ||
-            label.includes("fixed income")
-          ) {
-            result.debtPercent = val;
-          } else if (label.includes("cash")) {
-            result.cashPercent = val;
-          } else if (label.includes("other")) {
-            result.otherPercent = val;
-          }
-        });
-    }
-  });
-
-  // --- Sector allocation ---
-  const sectors: SectorAllocation = {
-    cyclical: 0, sensitive: 0, defensive: 0,
-    financialServices: 0, realEstate: 0, consumerCyclical: 0, basicMaterials: 0,
-    communicationServices: 0, energy: 0, industrials: 0, technology: 0,
-    consumerDefensive: 0, healthcare: 0, utilities: 0,
-  };
-
-  // Map Morningstar sector labels to our keys
-  const sectorMap: Record<string, keyof SectorAllocation> = {
-    "financial services": "financialServices",
-    "financial service": "financialServices",
-    "financialservices": "financialServices",
-    "real estate": "realEstate",
-    "realestate": "realEstate",
-    "consumer cyclical": "consumerCyclical",
-    "consumercyclical": "consumerCyclical",
-    "basic materials": "basicMaterials",
-    "basicmaterials": "basicMaterials",
-    "communication services": "communicationServices",
-    "communicationservices": "communicationServices",
-    "energy": "energy",
-    "industrials": "industrials",
-    "technology": "technology",
-    "consumer defensive": "consumerDefensive",
-    "consumerdefensive": "consumerDefensive",
-    "consumer staples": "consumerDefensive",
-    "healthcare": "healthcare",
-    "health care": "healthcare",
-    "utilities": "utilities",
-    "cyclical": "cyclical",
-    "sensitive": "sensitive",
-    "defensive": "defensive",
-  };
-
-  // Try to find sector table
-  let sectorFound = false;
-  $("table").each((_i, table) => {
-    const tableText = $(table).text().toLowerCase();
-    if (
-      !tableText.includes("sector") &&
-      !tableText.includes("financial") &&
-      !tableText.includes("technology")
-    ) {
-      return;
-    }
-
-    $(table)
-      .find("tr")
-      .each((_j, row) => {
-        const cells = $(row).find("td, th");
-        if (cells.length < 2) return;
-        const label = cells.eq(0).text().trim().toLowerCase();
-        const valText = cells.eq(1).text().trim();
-
-        for (const [key, fieldName] of Object.entries(sectorMap)) {
-          if (label.includes(key)) {
-            const val = parsePercent(valText);
-            if (val > 0) {
-              sectors[fieldName] = val;
-              sectorFound = true;
-            }
-          }
-        }
-      });
-  });
-
-  // Also look in divs / spans with sector labels
-  if (!sectorFound) {
-    $("[class*='sector'], [id*='sector'], [class*='Sector']").each((_i, el) => {
-      const text = $(el).text().toLowerCase();
-      for (const [key, fieldName] of Object.entries(sectorMap)) {
-        if (text.includes(key)) {
-          const nums = text.match(/[\d.]+\s*%/g);
-          if (nums && nums.length > 0) {
-            sectors[fieldName] = parsePercent(nums[0]);
-          }
-        }
-      }
-    });
-  }
-
-  // Compute parent sectors from subsectors if missing
-  if (sectors.cyclical === 0) {
-    sectors.cyclical =
-      sectors.financialServices +
-      sectors.realEstate +
-      sectors.consumerCyclical +
-      sectors.basicMaterials;
-  }
-  if (sectors.sensitive === 0) {
-    sectors.sensitive =
-      sectors.communicationServices +
-      sectors.energy +
-      sectors.industrials +
-      sectors.technology;
-  }
-  if (sectors.defensive === 0) {
-    sectors.defensive =
-      sectors.consumerDefensive + sectors.healthcare + sectors.utilities;
-  }
-
-  result.sectors = sectors;
-  return result;
-}
-
-// In-memory cache per fund name
 const cache = new Map<string, { data: MorningstarData; ts: number }>();
-const CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
+const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
 export async function getMorningstarData(fundName: string): Promise<MorningstarData> {
-  const cached = cache.get(fundName);
+  const cacheKey = fundName.toLowerCase().trim();
+  const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
     return cached.data;
   }
 
-  logger.info({ fundName }, "Fetching Morningstar data");
+  logger.info({ fundName }, "Computing Morningstar-style data via AMFI scheme category");
 
-  const factsheetUrl = await searchMorningstar(fundName);
-  logger.info({ fundName, factsheetUrl }, "Morningstar URL found");
+  // Fetch scheme category + Morningstar URL in parallel
+  const [category, morningstarUrl] = await Promise.all([
+    getSchemeCategory(fundName),
+    getMorningstarUrl(fundName),
+  ]);
 
-  const partial = factsheetUrl ? await scrapeFactsheet(factsheetUrl) : {};
-
-  const defaultSectors: SectorAllocation = {
-    cyclical: 0, sensitive: 0, defensive: 0,
-    financialServices: 0, realEstate: 0, consumerCyclical: 0, basicMaterials: 0,
-    communicationServices: 0, energy: 0, industrials: 0, technology: 0,
-    consumerDefensive: 0, healthcare: 0, utilities: 0,
-  };
+  const profile = profileFromCategory(category, fundName);
+  const sectors = computeSectors(profile);
 
   const data: MorningstarData = {
     fundName,
-    morningstarUrl: factsheetUrl,
-    equityPercent: partial.equityPercent ?? 0,
-    debtPercent: partial.debtPercent ?? 0,
-    cashPercent: partial.cashPercent ?? 0,
-    otherPercent: partial.otherPercent ?? 0,
-    sectors: partial.sectors ?? defaultSectors,
+    morningstarUrl,
+    equityPercent: profile.equityPercent,
+    debtPercent: profile.debtPercent,
+    cashPercent: profile.cashPercent,
+    otherPercent: 0,
+    sectors,
+    isEstimated: true,
   };
 
-  cache.set(fundName, { data, ts: Date.now() });
+  cache.set(cacheKey, { data, ts: Date.now() });
   return data;
 }

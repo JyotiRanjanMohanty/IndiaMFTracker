@@ -12,4 +12,6 @@ export interface GrowwData {
   /** @nullable */
   growwUrl?: string | null;
   marketCap: MarketCapAllocation;
+  /** True when market cap is derived from AMFI scheme category (not live scraped data) */
+  isEstimated: boolean;
 }

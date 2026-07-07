@@ -7,38 +7,46 @@ const router: IRouter = Router();
 
 const README_CONTENT = `# India Mutual Fund Portfolio Tracker
 
-A full-stack web application to track and analyse your India mutual fund portfolio's
-sector allocation and market cap distribution.
+A full-stack web application to analyse your India mutual fund SIP portfolio's
+sector allocation and market capitalisation distribution.
 
 ## Features
 
-- **Fund Search**: Auto-complete fund search powered by the AMFI mutual fund database
-- **Portfolio Builder**: Add multiple funds with SIP % allocation (must sum to 100%)
-- **Sector Allocation Analysis**:
-  - Equity / Debt / Cash split from Morningstar India
-  - Three high-level sectors: Cyclical, Sensitive, Defensive
-  - 11 sub-sectors (4 Cyclical + 4 Sensitive + 3 Defensive) from Morningstar factsheets
-- **Market Cap Analysis**: Large / Mid / Small cap split from Groww
-- **Interactive Charts**: Recharts pie charts and dual-ring sector charts
-- **Source Download**: Download the full source code as a ZIP archive
+- **Fund Search** — Auto-complete search powered by the AMFI fund database (mfapi.in)
+- **Portfolio Builder** — Add multiple funds with SIP % allocation (must sum to 100%)
+- **Sector Allocation Analysis**
+  - Equity / Debt / Cash split derived from each fund's SEBI category
+  - Three super-sectors: Cyclical, Sensitive, Defensive
+  - 11 subsectors: Financial Services, Consumer Cyclical, Basic Materials, Real Estate,
+    Technology, Industrials, Energy, Communication Services,
+    Healthcare, Consumer Defensive, Utilities
+  - Dual-ring pie chart + subsector breakdown with progress bars
+- **Market Cap Analysis** — Large / Mid / Small cap split from SEBI-mandated category data
+- **Interactive Charts** — Recharts dual-ring sector chart + pie charts
+- **Source Download** — Download full source code as a ZIP archive
+
+> **Data note:** Sector and market-cap figures are category-typical estimates
+> derived from each fund's SEBI scheme category (e.g. "Equity Scheme – Flexi Cap Fund")
+> using SEBI-mandated allocation ranges, not real-time holdings data.
+> The Morningstar India and Groww portals have blocked all server-side API access;
+> mfapi.in (AMFI data) is used as the sole live data source.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 19 + TypeScript + Vite |
+| Frontend | React 19 + TypeScript 5.9 + Vite 6 |
 | Styling | Tailwind CSS v4 + shadcn/ui |
 | Charts | Recharts |
-| State / Data | TanStack React Query |
+| State / Data | TanStack React Query v5 |
 | Routing | Wouter |
-| Backend | Node.js + Express 5 + TypeScript |
-| API Contract | OpenAPI 3.1 (Orval codegen) |
-| Web Scraping | Axios + Cheerio |
-| Fund Data | AMFI via mfapi.in |
-| Sector Data | Morningstar India (factsheet scraping) |
-| Market Cap | Groww (page scraping) |
+| Backend | Node.js 24 + Express 5 + TypeScript |
+| API Contract | OpenAPI 3.1 → Orval codegen |
+| HTTP Client (server) | Axios |
+| Fund Metadata | AMFI via mfapi.in |
+| Sector / Market Cap | SEBI category model |
 | Monorepo | pnpm workspaces |
-| Validation | Zod |
+| Schema Validation | Zod |
 
 ## Project Structure
 
@@ -48,117 +56,128 @@ sector allocation and market cap distribution.
 │   ├── api-server/          # Express 5 API server
 │   │   └── src/
 │   │       ├── lib/
-│   │       │   ├── fundSearch.ts          # AMFI fund search
-│   │       │   ├── morningstarScraper.ts  # Morningstar data
-│   │       │   └── growwScraper.ts        # Groww market cap data
+│   │       │   ├── fundSearch.ts          # AMFI fund list loader + fuzzy search
+│   │       │   ├── morningstarScraper.ts  # Sector + asset allocation (SEBI category model)
+│   │       │   └── growwScraper.ts        # Market cap allocation (SEBI category model)
 │   │       └── routes/
-│   │           ├── funds.ts               # /api/funds/* routes
-│   │           ├── portfolio.ts           # /api/portfolio/analyze
-│   │           └── source.ts              # /api/source/download
+│   │           ├── funds.ts               # GET /api/funds/search|morningstar|groww
+│   │           ├── portfolio.ts           # POST /api/portfolio/analyze
+│   │           └── source.ts              # GET /api/source/download
 │   └── mf-tracker/          # React + Vite frontend
 │       └── src/
 │           ├── pages/
-│           │   ├── home.tsx               # Portfolio builder
-│           │   └── analysis.tsx           # Results & charts
+│           │   ├── home.tsx               # Portfolio builder UI
+│           │   └── analysis.tsx           # Results, charts, and breakdowns
+│           ├── lib/
+│           │   └── store.tsx              # Global state (Zustand)
 │           └── App.tsx
 ├── lib/
 │   ├── api-spec/
-│   │   └── openapi.yaml     # OpenAPI 3.1 contract
-│   ├── api-client-react/    # Generated React Query hooks
-│   └── api-zod/             # Generated Zod schemas
+│   │   └── openapi.yaml     # OpenAPI 3.1 contract (source of truth)
+│   ├── api-client-react/    # Orval-generated React Query hooks
+│   └── api-zod/             # Orval-generated Zod schemas
+├── package.json
+├── pnpm-workspace.yaml
 └── README.md
 \`\`\`
 
-## Code Execution Flow
+## Data Flow
 
-1. **Frontend loads** — fetches fund suggestions as user types (debounced)
-2. **User builds portfolio** — enters fund names (auto-suggest) + SIP %
-3. **Validate** — SIP percentages must sum to 100%
-4. **Analyze Portfolio** — POST \`/api/portfolio/analyze\`
-5. **API Server**:
-   a. Fetches Morningstar India factsheet for each fund (scraping + caching)
-   b. Fetches Groww fund page for each fund (scraping + caching)
-   c. Computes weighted-average aggregations across all funds
-   d. Returns combined analysis JSON
-6. **Frontend renders** charts:
-   - Equity / Debt / Cash / Other asset allocation pie
-   - Sector allocation dual-ring chart (outer: Cyclical/Sensitive/Defensive; inner: 11 subsectors)
-   - Market cap pie chart (Large / Mid / Small / Others)
-   - Per-fund breakdown cards
+1. **User searches** a fund name → frontend calls \`GET /api/funds/search?q=...\`
+2. **User builds portfolio** — assigns SIP % to each fund (must total 100%)
+3. **Analyse** — frontend calls \`POST /api/portfolio/analyze\`
+4. **API server** for each fund:
+   a. Calls mfapi.in to resolve the AMFI scheme code + SEBI category
+   b. Applies category-based allocation model → equity/debt/cash + 11 sector weights
+   c. Applies SEBI market-cap mandate model → large/mid/small cap split
+   d. Computes SIP-weighted aggregates across all funds
+5. **Frontend renders**:
+   - Equity / Debt / Cash allocation pie
+   - Market cap pie (Large / Mid / Small)
+   - Sector dual-ring chart (centre: super-sectors; ring: 11 subsectors)
+   - Subsector breakdown with labelled progress bars
+   - Per-fund contribution cards
 
 ## Local Setup
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 9+ (\`npm install -g pnpm\`)
+- **Node.js 20+** (Node 24 recommended — matches the Replit environment)
+- **pnpm 9+** — install via \`npm install -g pnpm\`
 
-### Install
+### 1 — Clone and install
 
 \`\`\`bash
-git clone <repo>
-cd <repo>
+git clone <repo-url>
+cd <repo-folder>
 pnpm install
 \`\`\`
 
-### Environment Variables
+### 2 — Set the session secret
 
-Create a \`.env\` file (or export in terminal):
+Create a \`.env\` file in the repo root (only required by the API server for cookie signing):
 
 \`\`\`env
-DATABASE_URL=postgresql://localhost:5432/mftracker   # optional, not required for core features
+SESSION_SECRET=any-random-string-here
 \`\`\`
 
-### Run in Development
+No database or external API key is required.
 
-Terminal 1 — API Server:
+### 3 — Run in development (two terminals)
+
+**Terminal A — API Server** (runs on port 5000 by default):
+
 \`\`\`bash
 PORT=5000 pnpm --filter @workspace/api-server run dev
 \`\`\`
 
-Terminal 2 — Frontend:
+**Terminal B — Frontend** (runs on port 5173 by default):
+
 \`\`\`bash
-PORT=5173 BASE_PATH=/ pnpm --filter @workspace/mf-tracker run dev
+PORT=5173 pnpm --filter @workspace/mf-tracker run dev
 \`\`\`
 
-Then open **http://localhost:5173**
+Open **http://localhost:5173** in your browser.
 
-The frontend's Vite dev server proxies \`/api/*\` calls to the API server on port 5000.
-If you run both services, add a Vite proxy config in \`artifacts/mf-tracker/vite.config.ts\`:
+> The Vite dev server already proxies \`/api/*\` to port 5000.
+> If you change the API port, update \`server.proxy\` in
+> \`artifacts/mf-tracker/vite.config.ts\` accordingly.
 
-\`\`\`ts
-server: {
-  proxy: {
-    '/api': 'http://localhost:5000'
-  }
-}
+### 4 — Build for production
+
+\`\`\`bash
+# Build API server
+pnpm --filter @workspace/api-server run build
+
+# Build frontend
+pnpm --filter @workspace/mf-tracker run build
+
+# Serve API (from dist/)
+PORT=5000 node artifacts/api-server/dist/index.js
 \`\`\`
 
-### Regenerate API Client (after changing openapi.yaml)
+### Regenerate API client (after editing openapi.yaml)
 
 \`\`\`bash
 pnpm --filter @workspace/api-spec run codegen
 \`\`\`
 
-### Build for Production
-
-\`\`\`bash
-pnpm run build
-\`\`\`
+This regenerates \`lib/api-client-react/\` and \`lib/api-zod/\` from the OpenAPI spec.
 
 ## Data Sources
 
-| Source | Usage | Notes |
-|--------|-------|-------|
-| [mfapi.in](https://api.mfapi.in/mf) | Fund name autocomplete | Free, comprehensive AMFI list |
-| [Morningstar India](https://www.morningstar.in) | Equity/debt/cash split, sector allocation | Scraping factsheet pages |
-| [Groww](https://groww.in) | Market cap breakdown | Scraping fund pages |
+| Source | Usage | Access |
+|--------|-------|--------|
+| [mfapi.in](https://api.mfapi.in/mf) | Fund search, scheme code, SEBI category | Free, no auth |
+| Morningstar India XML search | Fund URL lookup only (for deep-link) | Free endpoint |
+| SEBI category model | Sector + market cap allocation | Built-in (no network call) |
 
-## Notes on Scraping
+## Caveats
 
-- Results are cached in-memory for 4 hours to reduce load on source sites
-- Some funds may not be found if the name doesn't match the site's search index
-- Scraping may break if Morningstar or Groww update their HTML/JS structure
+- Sector and market-cap data are **category-level estimates**, not per-fund holdings.
+  Funds in the same SEBI category share the same model allocation.
+- All data is cached in-memory (6 h TTL) — no persistent database required.
+- The app has no login or user accounts; portfolio state lives in the browser session.
 `;
 
 function addDirToZip(zip: AdmZip, srcPath: string, zipPrefix: string): void {

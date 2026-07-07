@@ -258,7 +258,7 @@ components:
 
     MorningstarData:
       type: object
-      required: [fundName, equityPercent, debtPercent, cashPercent, sectors]
+      required: [fundName, equityPercent, debtPercent, cashPercent, sectors, isEstimated]
       properties:
         fundName:
           type: string
@@ -274,10 +274,13 @@ components:
           type: number
         sectors:
           $ref: "#/components/schemas/SectorAllocation"
+        isEstimated:
+          type: boolean
+          description: True when allocation is derived from AMFI scheme category (not live scraped data)
 
     MarketCapAllocation:
       type: object
-      required: [largeCap, midCap, smallCap]
+      required: [largeCap, midCap, smallCap, others]
       properties:
         largeCap:
           type: number
@@ -290,7 +293,7 @@ components:
 
     GrowwData:
       type: object
-      required: [fundName, marketCap]
+      required: [fundName, marketCap, isEstimated]
       properties:
         fundName:
           type: string
@@ -298,6 +301,9 @@ components:
           type: ["string", "null"]
         marketCap:
           $ref: "#/components/schemas/MarketCapAllocation"
+        isEstimated:
+          type: boolean
+          description: True when market cap is derived from AMFI scheme category (not live scraped data)
 
     PortfolioFundInput:
       type: object

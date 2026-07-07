@@ -63,7 +63,8 @@ export const GetFundMorningstarDataResponse = zod.object({
   "consumerDefensive": zod.number().describe('Consumer Defensive % (defensive)'),
   "healthcare": zod.number().describe('Healthcare % (defensive)'),
   "utilities": zod.number().describe('Utilities % (defensive)')
-}).describe('11-subsector Morningstar allocation breakdown')
+}).describe('11-subsector Morningstar allocation breakdown'),
+  "isEstimated": zod.boolean().describe('True when allocation is derived from AMFI scheme category (not live scraped data)')
 })
 
 
@@ -81,8 +82,9 @@ export const GetFundGrowwDataResponse = zod.object({
   "largeCap": zod.number(),
   "midCap": zod.number(),
   "smallCap": zod.number(),
-  "others": zod.number().optional()
-})
+  "others": zod.number()
+}),
+  "isEstimated": zod.boolean().describe('True when market cap is derived from AMFI scheme category (not live scraped data)')
 })
 
 
@@ -127,7 +129,8 @@ export const AnalyzePortfolioResponse = zod.object({
   "consumerDefensive": zod.number().describe('Consumer Defensive % (defensive)'),
   "healthcare": zod.number().describe('Healthcare % (defensive)'),
   "utilities": zod.number().describe('Utilities % (defensive)')
-}).describe('11-subsector Morningstar allocation breakdown')
+}).describe('11-subsector Morningstar allocation breakdown'),
+  "isEstimated": zod.boolean().describe('True when allocation is derived from AMFI scheme category (not live scraped data)')
 }),zod.null()]).optional(),
   "groww": zod.union([zod.object({
   "fundName": zod.string(),
@@ -136,8 +139,9 @@ export const AnalyzePortfolioResponse = zod.object({
   "largeCap": zod.number(),
   "midCap": zod.number(),
   "smallCap": zod.number(),
-  "others": zod.number().optional()
-})
+  "others": zod.number()
+}),
+  "isEstimated": zod.boolean().describe('True when market cap is derived from AMFI scheme category (not live scraped data)')
 }),zod.null()]).optional(),
   "morningstarError": zod.string().nullish(),
   "growwError": zod.string().nullish()

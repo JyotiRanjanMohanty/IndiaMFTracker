@@ -16,4 +16,6 @@ export interface MorningstarData {
   cashPercent: number;
   otherPercent?: number;
   sectors: SectorAllocation;
+  /** True when allocation is derived from AMFI scheme category (not live scraped data) */
+  isEstimated: boolean;
 }

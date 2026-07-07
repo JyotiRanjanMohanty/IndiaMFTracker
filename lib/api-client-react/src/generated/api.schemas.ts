@@ -67,13 +67,15 @@ export interface MorningstarData {
   cashPercent: number;
   otherPercent?: number;
   sectors: SectorAllocation;
+  /** True when allocation is derived from AMFI scheme category (not live scraped data) */
+  isEstimated: boolean;
 }
 
 export interface MarketCapAllocation {
   largeCap: number;
   midCap: number;
   smallCap: number;
-  others?: number;
+  others: number;
 }
 
 export interface GrowwData {
@@ -81,6 +83,8 @@ export interface GrowwData {
   /** @nullable */
   growwUrl?: string | null;
   marketCap: MarketCapAllocation;
+  /** True when market cap is derived from AMFI scheme category (not live scraped data) */
+  isEstimated: boolean;
 }
 
 export interface PortfolioFundInput {

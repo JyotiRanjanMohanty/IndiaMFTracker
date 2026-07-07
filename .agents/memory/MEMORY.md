@@ -1,0 +1,2 @@
+- [Indian MF data sources](indian-mf-data-sources.md) — all major portals block server-side scraping; only mfapi.in works reliably
+- [MF tracker data architecture](mf-tracker-data-arch.md) — uses SEBI category model for sector + market cap; Morningstar XML for fund URL only
