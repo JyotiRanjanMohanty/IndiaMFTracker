@@ -171,11 +171,28 @@ const MIN_NAME_SIMILARITY = 0.25;
 const schemeCategoryCache = new Map<string, { category: string; ts: number }>();
 const SCHEME_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
-async function getSchemeCategory(fundName: string): Promise<string> {
-  const cacheKey = fundName.toLowerCase().trim();
+async function getSchemeCategory(fundName: string, schemeCode?: string): Promise<string> {
+  const cacheKey = schemeCode ? `scheme:${schemeCode}` : fundName.toLowerCase().trim();
   const cached = schemeCategoryCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < SCHEME_CACHE_TTL) {
     return cached.category;
+  }
+
+  if (schemeCode) {
+    try {
+      const detailResp = await axios.get<{ meta: MfapiMeta }>(
+        `https://api.mfapi.in/mf/${encodeURIComponent(schemeCode)}`,
+        { timeout: 10_000, headers: { Accept: "application/json" } }
+      );
+      const category = detailResp.data.meta?.scheme_category;
+      if (category) {
+        schemeCategoryCache.set(cacheKey, { category, ts: Date.now() });
+        logger.info({ fundName, schemeCode, category }, "Got AMFI scheme category from scheme code for market cap");
+        return category;
+      }
+    } catch (err) {
+      logger.warn({ err, fundName, schemeCode }, "Direct AMFI scheme-code lookup failed for market cap; falling back to name search");
+    }
   }
 
   try {
@@ -222,16 +239,16 @@ async function getSchemeCategory(fundName: string): Promise<string> {
 const cache = new Map<string, { data: GrowwData; ts: number }>();
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
-export async function getGrowwData(fundName: string): Promise<GrowwData> {
-  const cacheKey = fundName.toLowerCase().trim();
+export async function getGrowwData(fundName: string, options?: { schemeCode?: string }): Promise<GrowwData> {
+  const cacheKey = options?.schemeCode ? `scheme:${options.schemeCode}` : fundName.toLowerCase().trim();
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
     return cached.data;
   }
 
-  logger.info({ fundName }, "Computing market cap via AMFI scheme category");
+  logger.info({ fundName, schemeCode: options?.schemeCode }, "Computing market cap via AMFI scheme category");
 
-  const category = await getSchemeCategory(fundName);
+  const category = await getSchemeCategory(fundName, options?.schemeCode);
   const marketCap = marketCapFromCategory(category);
 
   const data: GrowwData = {

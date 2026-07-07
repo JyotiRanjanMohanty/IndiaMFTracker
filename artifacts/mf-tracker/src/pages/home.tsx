@@ -251,7 +251,7 @@ export default function Home() {
                   <div className="space-y-4">
                     <div className="flex items-center gap-3 text-secondary font-medium">
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      Scraping live data from Morningstar & Groww...
+                      Preparing portfolio analysis...
                     </div>
                     <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
                       <div className="bg-secondary h-1.5 rounded-full animate-pulse w-full origin-left" style={{ animationDuration: '2s' }}></div>

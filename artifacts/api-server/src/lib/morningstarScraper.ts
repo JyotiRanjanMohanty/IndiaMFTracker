@@ -314,11 +314,28 @@ const MIN_NAME_SIMILARITY = 0.25;
 const schemeMetaCache = new Map<string, { meta: MfapiMeta; ts: number }>();
 const SCHEME_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours — AMFI categories don't change
 
-async function getSchemeCategory(fundName: string): Promise<string> {
-  const cacheKey = fundName.toLowerCase().trim();
+async function getSchemeCategory(fundName: string, schemeCode?: string): Promise<string> {
+  const cacheKey = schemeCode ? `scheme:${schemeCode}` : fundName.toLowerCase().trim();
   const cached = schemeMetaCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < SCHEME_CACHE_TTL) {
     return cached.meta.scheme_category;
+  }
+
+  if (schemeCode) {
+    try {
+      const detailResp = await axios.get<{ meta: MfapiMeta }>(
+        `https://api.mfapi.in/mf/${encodeURIComponent(schemeCode)}`,
+        { timeout: 10_000, headers: { Accept: "application/json" } }
+      );
+      const meta = detailResp.data.meta;
+      if (meta?.scheme_category) {
+        schemeMetaCache.set(cacheKey, { meta, ts: Date.now() });
+        logger.info({ fundName, schemeCode, category: meta.scheme_category }, "Got AMFI scheme category from scheme code");
+        return meta.scheme_category;
+      }
+    } catch (err) {
+      logger.warn({ err, fundName, schemeCode }, "Direct AMFI scheme-code lookup failed; falling back to name search");
+    }
   }
 
   try {
@@ -404,18 +421,18 @@ async function getMorningstarUrl(fundName: string): Promise<string | null> {
 const cache = new Map<string, { data: MorningstarData; ts: number }>();
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
-export async function getMorningstarData(fundName: string): Promise<MorningstarData> {
-  const cacheKey = fundName.toLowerCase().trim();
+export async function getMorningstarData(fundName: string, options?: { schemeCode?: string }): Promise<MorningstarData> {
+  const cacheKey = options?.schemeCode ? `scheme:${options.schemeCode}` : fundName.toLowerCase().trim();
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
     return cached.data;
   }
 
-  logger.info({ fundName }, "Computing Morningstar-style data via AMFI scheme category");
+  logger.info({ fundName, schemeCode: options?.schemeCode }, "Computing Morningstar-style data via AMFI scheme category");
 
   // Fetch scheme category + Morningstar URL in parallel
   const [category, morningstarUrl] = await Promise.all([
-    getSchemeCategory(fundName),
+    getSchemeCategory(fundName, options?.schemeCode),
     getMorningstarUrl(fundName),
   ]);
 

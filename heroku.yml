@@ -1,0 +1,6 @@
+build:
+  docker: false
+  config:
+    NODE_ENV: production
+run:
+  web: pnpm start

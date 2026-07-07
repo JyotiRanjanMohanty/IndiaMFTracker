@@ -94,8 +94,8 @@ router.post("/portfolio/analyze", async (req, res): Promise<void> => {
   const results = await Promise.allSettled(
     funds.map(async (fund) => {
       const [morningstarResult, growwResult] = await Promise.allSettled([
-        getMorningstarData(fund.fundName),
-        getGrowwData(fund.fundName),
+        getMorningstarData(fund.fundName, { schemeCode: fund.schemeCode ?? undefined }),
+        getGrowwData(fund.fundName, { schemeCode: fund.schemeCode ?? undefined }),
       ]);
 
       return {

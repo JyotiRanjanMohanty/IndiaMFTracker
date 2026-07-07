@@ -73,16 +73,11 @@ function FundCard({ fund: initialFund }: { fund: FundAnalysis }) {
 
   return (
     <Card className="overflow-hidden">
-      <CardHeader className="bg-muted/10 py-3 border-b flex flex-row items-start justify-between space-y-0">
-        <div className="space-y-1 pr-4">
+      <CardHeader className="bg-muted/10 py-3 border-b">
+        <div className="space-y-1">
           <CardTitle className="text-base leading-snug">{fund.fundName}</CardTitle>
           <CardDescription className="font-mono text-xs text-primary font-medium">SIP Weight: {fund.sipPercent}%</CardDescription>
         </div>
-        {fund.morningstar?.morningstarUrl && (
-          <a href={fund.morningstar.morningstarUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline shrink-0">
-            Morningstar ↗
-          </a>
-        )}
       </CardHeader>
       <CardContent className="p-4 space-y-4">
 
@@ -150,6 +145,12 @@ function FundCard({ fund: initialFund }: { fund: FundAnalysis }) {
                 <Badge variant="secondary" className="font-mono bg-[var(--color-chart-4)] text-white hover:bg-[var(--color-chart-4)]">O: {(fund.groww.marketCap.others ?? 0).toFixed(0)}%</Badge>
               )}
             </div>
+          </div>
+        )}
+
+        {!fund.morningstar && !fund.groww && !fund.morningstarError && !fund.growwError && (
+          <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            No allocation data was returned for this fund yet.
           </div>
         )}
 
@@ -249,6 +250,9 @@ export default function Analysis() {
   ].filter(d => d.value > 0);
 
   const formatPct = (val: number) => `${val.toFixed(2)}%`;
+  const hasAssetClassData = assetClassData.length > 0;
+  const hasMarketCapData = mcapData.length > 0;
+  const hasSectorData = superSectorData.length > 0 || subsectorData.length > 0;
 
   // Subsector groups for breakdown table
   const cyclicalSubs: Array<{ key: SubsectorKey; value: number }> = [
@@ -270,7 +274,7 @@ export default function Analysis() {
   ];
 
   return (
-    <div className="space-y-8 pb-12 animate-in fade-in duration-500">
+    <div className="space-y-8 pb-12">
 
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b pb-6">
@@ -306,23 +310,33 @@ export default function Analysis() {
             <CardTitle>Asset Allocation</CardTitle>
             <CardDescription>Equity · Debt · Cash breakdown</CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 min-h-[260px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={assetClassData} cx="50%" cy="50%" innerRadius={65} outerRadius={90} paddingAngle={2} dataKey="value">
-                  {assetClassData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                </Pie>
-                <Tooltip formatter={formatPct} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="flex flex-wrap justify-center gap-3 mt-2 text-xs font-mono text-muted-foreground">
-              {assetClassData.map(d => (
-                <span key={d.name} className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
-                  {d.name} {d.value.toFixed(1)}%
-                </span>
-              ))}
-            </div>
+          <CardContent className="flex-1">
+            {hasAssetClassData ? (
+              <>
+                <div className="h-[240px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={assetClassData} cx="50%" cy="50%" innerRadius={65} outerRadius={90} paddingAngle={2} dataKey="value">
+                        {assetClassData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                      </Pie>
+                      <Tooltip formatter={formatPct} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-wrap justify-center gap-3 mt-2 text-xs font-mono text-muted-foreground">
+                  {assetClassData.map(d => (
+                    <span key={d.name} className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
+                      {d.name} {d.value.toFixed(1)}%
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex h-[240px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground text-center px-4">
+                No asset allocation data is available for this portfolio yet.
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -332,23 +346,33 @@ export default function Analysis() {
             <CardTitle>Market Capitalisation</CardTitle>
             <CardDescription>Large · Mid · Small cap size bias</CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 min-h-[260px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={mcapData} cx="50%" cy="50%" innerRadius={65} outerRadius={90} paddingAngle={2} dataKey="value">
-                  {mcapData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                </Pie>
-                <Tooltip formatter={formatPct} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="flex flex-wrap justify-center gap-3 mt-2 text-xs font-mono text-muted-foreground">
-              {mcapData.map(d => (
-                <span key={d.name} className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
-                  {d.name} {d.value.toFixed(1)}%
-                </span>
-              ))}
-            </div>
+          <CardContent className="flex-1">
+            {hasMarketCapData ? (
+              <>
+                <div className="h-[240px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={mcapData} cx="50%" cy="50%" innerRadius={65} outerRadius={90} paddingAngle={2} dataKey="value">
+                        {mcapData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                      </Pie>
+                      <Tooltip formatter={formatPct} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-wrap justify-center gap-3 mt-2 text-xs font-mono text-muted-foreground">
+                  {mcapData.map(d => (
+                    <span key={d.name} className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.fill }} />
+                      {d.name} {d.value.toFixed(1)}%
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex h-[240px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground text-center px-4">
+                No market capitalisation data is available for this portfolio yet.
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -359,78 +383,84 @@ export default function Analysis() {
         <CardHeader className="border-b bg-muted/20">
           <CardTitle className="text-xl">Sector Allocation</CardTitle>
           <CardDescription>
-            Three super-sectors (Cyclical · Sensitive · Defensive) broken into 11 subsectors — as % of total portfolio
+            Three super-sectors (Cyclical · Sensitive · Defensive) broken into 11 subsectors — as % of total portfolio. These totals sum to the portfolio's equity exposure, not 100% of the full portfolio.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+          {hasSectorData ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
-            {/* Left — dual-ring pie chart */}
-            <div>
-              <p className="text-xs text-muted-foreground text-center mb-2 font-mono uppercase tracking-wide">
-                Centre: super-sectors &nbsp;·&nbsp; Ring: subsectors
-              </p>
-              <div className="h-[320px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    {/* Centre disc — super sectors */}
-                    <Pie
-                      data={superSectorData}
-                      cx="50%" cy="50%"
-                      innerRadius={0} outerRadius={70}
-                      dataKey="value"
-                      stroke="none"
-                    >
-                      {superSectorData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                    </Pie>
-                    {/* Outer ring — subsectors */}
-                    <Pie
-                      data={subsectorData}
-                      cx="50%" cy="50%"
-                      innerRadius={76} outerRadius={120}
-                      dataKey="value"
-                      stroke="white"
-                      strokeWidth={1.5}
-                    >
-                      {subsectorData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                    </Pie>
-                    <Tooltip formatter={formatPct} />
-                  </PieChart>
-                </ResponsiveContainer>
+              {/* Left — dual-ring pie chart */}
+              <div>
+                <p className="text-xs text-muted-foreground text-center mb-2 font-mono uppercase tracking-wide">
+                  Centre: super-sectors &nbsp;·&nbsp; Ring: subsectors
+                </p>
+                <div className="h-[280px] sm:h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      {/* Centre disc — super sectors */}
+                      <Pie
+                        data={superSectorData}
+                        cx="50%" cy="50%"
+                        innerRadius={0} outerRadius={70}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {superSectorData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                      </Pie>
+                      {/* Outer ring — subsectors */}
+                      <Pie
+                        data={subsectorData}
+                        cx="50%" cy="50%"
+                        innerRadius={76} outerRadius={120}
+                        dataKey="value"
+                        stroke="white"
+                        strokeWidth={1.5}
+                      >
+                        {subsectorData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                      </Pie>
+                      <Tooltip formatter={formatPct} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* Super-sector legend under chart */}
+                <div className="flex justify-center gap-6 mt-2 text-xs font-mono text-muted-foreground">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: CYCLICAL_COLOR }} /> Cyclical {aggregated.sectors.cyclical.toFixed(1)}%</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: SENSITIVE_COLOR }} /> Sensitive {aggregated.sectors.sensitive.toFixed(1)}%</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: DEFENSIVE_COLOR }} /> Defensive {aggregated.sectors.defensive.toFixed(1)}%</span>
+                </div>
               </div>
-              {/* Super-sector legend under chart */}
-              <div className="flex justify-center gap-6 mt-2 text-xs font-mono text-muted-foreground">
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: CYCLICAL_COLOR }} /> Cyclical {aggregated.sectors.cyclical.toFixed(1)}%</span>
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: SENSITIVE_COLOR }} /> Sensitive {aggregated.sectors.sensitive.toFixed(1)}%</span>
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: DEFENSIVE_COLOR }} /> Defensive {aggregated.sectors.defensive.toFixed(1)}%</span>
+
+              {/* Right — subsector breakdown */}
+              <div className="space-y-6 pt-2">
+                <SuperSectorGroup
+                  title="Cyclical"
+                  totalValue={aggregated.sectors.cyclical}
+                  color={CYCLICAL_COLOR}
+                  subsectors={cyclicalSubs}
+                />
+                <div className="border-t" />
+                <SuperSectorGroup
+                  title="Sensitive"
+                  totalValue={aggregated.sectors.sensitive}
+                  color={SENSITIVE_COLOR}
+                  subsectors={sensitiveSubs}
+                />
+                <div className="border-t" />
+                <SuperSectorGroup
+                  title="Defensive"
+                  totalValue={aggregated.sectors.defensive}
+                  color={DEFENSIVE_COLOR}
+                  subsectors={defensiveSubs}
+                />
               </div>
-            </div>
 
-            {/* Right — subsector breakdown */}
-            <div className="space-y-6 pt-2">
-              <SuperSectorGroup
-                title="Cyclical"
-                totalValue={aggregated.sectors.cyclical}
-                color={CYCLICAL_COLOR}
-                subsectors={cyclicalSubs}
-              />
-              <div className="border-t" />
-              <SuperSectorGroup
-                title="Sensitive"
-                totalValue={aggregated.sectors.sensitive}
-                color={SENSITIVE_COLOR}
-                subsectors={sensitiveSubs}
-              />
-              <div className="border-t" />
-              <SuperSectorGroup
-                title="Defensive"
-                totalValue={aggregated.sectors.defensive}
-                color={DEFENSIVE_COLOR}
-                subsectors={defensiveSubs}
-              />
             </div>
-
-          </div>
+          ) : (
+            <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground text-center px-4">
+              No sector allocation data is available for this portfolio yet.
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -438,8 +468,8 @@ export default function Analysis() {
       <div className="pt-4 border-t space-y-6">
         <h2 className="text-2xl font-bold">Individual Fund Contributions</h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {funds.map((fund, idx) => (
-            <FundCard key={idx} fund={fund} />
+          {funds.map((fund) => (
+            <FundCard key={fund.fundName} fund={fund} />
           ))}
         </div>
       </div>

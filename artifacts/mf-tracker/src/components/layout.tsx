@@ -1,33 +1,11 @@
 import { Link, useLocation } from "wouter";
-import { useHealthCheck, useDownloadSource, getDownloadSourceQueryKey } from "@workspace/api-client-react";
-import { Activity, Download, LayoutDashboard, PieChart, Info } from "lucide-react";
+import { LayoutDashboard, PieChart, Info } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { Button } from "./ui/button";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { analysis } = useAppStore();
-  const { data: healthData, isError: isHealthError } = useHealthCheck();
-  
-  const { refetch: downloadZip, isFetching: isDownloading } = useDownloadSource({ 
-    query: { enabled: false, queryKey: getDownloadSourceQueryKey() } 
-  });
-
-  const handleDownload = async () => {
-    try {
-      const { data } = await downloadZip();
-      if (data) {
-        const url = URL.createObjectURL(data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'source.zip';
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    } catch (e) {
-      console.error("Download failed", e);
-    }
-  };
 
   const navItems = [
     { href: "/", label: "Portfolio Builder", icon: LayoutDashboard },
@@ -62,29 +40,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
 
-          <div className="flex items-center gap-4 ml-auto">
-            <div className="hidden md:flex items-center gap-2 text-xs font-mono">
-              <span className="text-primary-foreground/60">SYS_STATUS:</span>
-              {isHealthError ? (
-                <span className="flex items-center gap-1 text-destructive"><Activity className="w-3 h-3"/> OFFLINE</span>
-              ) : healthData ? (
-                <span className="flex items-center gap-1 text-secondary"><Activity className="w-3 h-3"/> ONLINE</span>
-              ) : (
-                <span className="flex items-center gap-1 text-primary-foreground/50"><Activity className="w-3 h-3 animate-pulse"/> PINGING...</span>
-              )}
-            </div>
-            
-            <Button 
-              variant="secondary" 
-              size="sm" 
-              className="gap-2 h-8 font-semibold shadow-sm"
-              onClick={handleDownload}
-              disabled={isDownloading}
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">{isDownloading ? "Zipping..." : "Source"}</span>
-            </Button>
-          </div>
+          <div className="flex items-center gap-4 ml-auto"></div>
         </div>
       </header>
 
